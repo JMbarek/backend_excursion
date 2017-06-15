@@ -8,17 +8,20 @@ import (
 	"github.com/gorilla/mux"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
+	"net/textproto"
 	"fmt"
+	"bytes"
 	"io"
 	"os"
-	"net/textproto"
-	"image/png"
-	"strconv"
 )
 
 var (
 	session    *mgo.Session
-	collection *mgo.Collection
+	excursionsCollection, imagesCollection *mgo.Collection
+)
+
+const (
+	UPLOAD_PATH = "C:/Users/jaouhar.mbarek/GoglandProjects/secondProj/src/github.com/JMbarek/mongoRestApi/upload/"
 )
 
 type Excursion struct {
@@ -43,6 +46,12 @@ type Excursion struct {
 	Length            string         `json:"length"`
 	CreatedOn         time.Time      `bson:"createdOn" json:"createdOn"`
 	UpdatedAt         time.Time      `bson:"updatedAt" json:"updatedAt"`
+}
+
+type Image struct {
+	Id        bson.ObjectId  `bson:"_id" json:"imageId"`
+	Excursion *Excursion  `bson:"_excursion" json:"excursion"`
+	Title     string
 }
 
 type FileHeader struct {
@@ -89,8 +98,8 @@ func CreateExcursionHandler(w http.ResponseWriter, r *http.Request) {
 	obj_id := bson.NewObjectId()
 	excursion.Id = obj_id
 	excursion.CreatedOn = time.Now()
-	//insert into document collection
-	err = collection.Insert(&excursion)
+	//insert into document excursionsCollection
+	err = excursionsCollection.Insert(&excursion)
 	if err != nil {
 		panic(err)
 	} else {
@@ -108,7 +117,7 @@ func ExcursionsHandler(w http.ResponseWriter, r *http.Request) {
 
 	var excursions []Excursion
 
-	iter := collection.Find(nil).Iter()
+	iter := excursionsCollection.Find(nil).Iter()
 	result := Excursion{}
 	for iter.Next(&result) {
 		excursions = append(excursions, result)
@@ -128,7 +137,7 @@ func ExcursionByIdHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := bson.ObjectIdHex(vars["id"])
 
-	err := collection.Find(bson.M{"_id": id}).One(&excursion)
+	err := excursionsCollection.Find(bson.M{"_id": id}).One(&excursion)
 	w.Header().Set("Content-Type", "application/json")
 	j, err := json.Marshal(ExcursionResource{Excursion: excursion})
 	if err != nil {
@@ -141,7 +150,7 @@ func ThemesHandler(w http.ResponseWriter, r *http.Request) {
 
 	var themes []string
 
-	iter := collection.Find(nil).Iter()
+	iter := excursionsCollection.Find(nil).Iter()
 	result := Excursion{}
 	for iter.Next(&result) {
 		themes = append(themes, result.Theme)
@@ -158,7 +167,7 @@ func DepartureCountriesHandler(w http.ResponseWriter, r *http.Request) {
 
 	var departureCountries []string
 
-	iter := collection.Find(nil).Iter()
+	iter := excursionsCollection.Find(nil).Iter()
 	result := Excursion{}
 	for iter.Next(&result) {
 		departureCountries = append(departureCountries, result.DepCountry)
@@ -177,7 +186,7 @@ func DestinationsInRegionHandler(w http.ResponseWriter, r *http.Request) {
 	region := vars["region"]
 
 	var destinationsInRegion []string
-	iter := collection.Find(bson.M{
+	iter := excursionsCollection.Find(bson.M{
 		"destinationRegion": region}).Iter()
 	result := Excursion{}
 	for iter.Next(&result) {
@@ -196,7 +205,7 @@ func RegionsHandler(w http.ResponseWriter, r *http.Request) {
 
 	var regions []string
 
-	iter := collection.Find(nil).Iter()
+	iter := excursionsCollection.Find(nil).Iter()
 	result := Excursion{}
 	for iter.Next(&result) {
 		regions = append(regions, result.DestinationRegion)
@@ -223,7 +232,7 @@ func UpdateExcursionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// partia update on MogoDB
-	err = collection.Update(bson.M{"_id": id},
+	err = excursionsCollection.Update(bson.M{"_id": id},
 		bson.M{"$set": bson.M{"title": excursionResource.Excursion.Title,
 			"organizerId":         excursionResource.Excursion.OrganizerId,
 			"description":         excursionResource.Excursion.Description,
@@ -258,7 +267,7 @@ func DeleteExcursionHandler(w http.ResponseWriter, r *http.Request) {
 	id := vars["id"]
 
 	// Remove from database
-	err = collection.Remove(bson.M{"_id": bson.ObjectIdHex(id)})
+	err = excursionsCollection.Remove(bson.M{"_id": bson.ObjectIdHex(id)})
 	if err != nil {
 		log.Printf("Could not find Excursion %s to delete", id)
 	}
@@ -276,7 +285,7 @@ func HandleAPI(w http.ResponseWriter, r *http.Request) {
 	theme := vars["theme"]
 
 	var excursions []Excursion
-	iter := collection.Find(bson.M{
+	iter := excursionsCollection.Find(bson.M{
 		//"departureDate":    departureDate,
 		"departureCountry": departureCountry,
 		"destination":      destination,
@@ -301,7 +310,7 @@ func HandleAPIByDepartureCountry(w http.ResponseWriter, r *http.Request) {
 	departureCountry := vars["departureCountry"]
 
 	var excursions []Excursion
-	iter := collection.Find(bson.M{
+	iter := excursionsCollection.Find(bson.M{
 		"departureCountry": departureCountry, }).Iter()
 	result := Excursion{}
 	for iter.Next(&result) {
@@ -323,7 +332,7 @@ func HandleAPIByTheme(w http.ResponseWriter, r *http.Request) {
 	theme := vars["theme"]
 
 	var excursions []Excursion
-	iter := collection.Find(bson.M{
+	iter := excursionsCollection.Find(bson.M{
 		"theme": theme}).Iter()
 	result := Excursion{}
 	for iter.Next(&result) {
@@ -345,7 +354,7 @@ func HandleAPIByDestination(w http.ResponseWriter, r *http.Request) {
 	destination := vars["destination"]
 
 	var excursions []Excursion
-	iter := collection.Find(bson.M{
+	iter := excursionsCollection.Find(bson.M{
 		"destination": destination, }).Iter()
 	result := Excursion{}
 	for iter.Next(&result) {
@@ -366,7 +375,7 @@ func HandleAPIByThemes(w http.ResponseWriter, r *http.Request) {
 	// param1 := r.URL.Query().Get("theme")
 	param1s := r.URL.Query()["theme"];
 	var excursions []Excursion
-	iter := collection.Find(bson.M{
+	iter := excursionsCollection.Find(bson.M{
 		"theme": param1s}).Iter()
 	result := Excursion{}
 	for iter.Next(&result) {
@@ -380,93 +389,110 @@ func HandleAPIByThemes(w http.ResponseWriter, r *http.Request) {
 	w.Write(j)
 }
 
-// upload logic
-func upload(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("method:", r.Method)
-	/*if r.Method == "GET" {
-		crutime := time.Now().Unix()
-		h := md5.New()
-		io.WriteString(h, strconv.FormatInt(crutime, 10))
-		token := fmt.Sprintf("%x", h.Sum(nil))
+func respond(w http.ResponseWriter, r *http.Request, status int, data interface{}) {
+	var buf bytes.Buffer
 
-		t, _ := template.ParseFiles("upload.gtpl")
-		t.Execute(w, token)
-	} else {*/
-	r.ParseMultipartForm(32 << 20)
+	if err := json.NewEncoder(&buf).Encode(data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/javascript")
+	w.WriteHeader(status)
+
+	if _, err := io.Copy(w, &buf); err != nil {
+		log.Println("respond:", err)
+	}
+}
+
+func PostImage(w http.ResponseWriter, r *http.Request) {
+	err := r.ParseMultipartForm(500000)
+	if err != nil {
+		body := ErrMessage{Message: err.Error(), Errors: nil}
+		respond(w, r, http.StatusBadRequest, body)
+		return
+	}
 	file, handler, err := r.FormFile("uploadfile")
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+
+	// begin save image in mongodb
+	vars := mux.Vars(r)
+	id := bson.ObjectIdHex(vars["id"])
+	var excursion Excursion
+
+	err = excursionsCollection.Find(bson.M{"_id": id}).One(&excursion)
+	if err != nil {
+		panic(err)
+	}
+	var image Image
+	// get a new id
+	obj_id := bson.NewObjectId()
+	image.Id = obj_id
+	image.Title = handler.Filename
+	image.Excursion = &excursion
+	//insert into document excursionsCollection
+	err = imagesCollection.Insert(&image)
+	if err != nil {
+		panic(err)
+	} else {
+		log.Printf("Added new Image with title: %s", image.Title)
+	}
+	// end save image in mongodb
+
 	defer file.Close()
 	fmt.Fprintf(w, "%v", handler.Header)
-	f, err := os.OpenFile("./test/"+handler.Filename, os.O_WRONLY|os.O_CREATE, 0666)
+	f, err := os.OpenFile(UPLOAD_PATH+handler.Filename, os.O_WRONLY|os.O_CREATE, 0666)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 	defer f.Close()
 	io.Copy(f, file)
-	//}
+	respond(w, r, http.StatusOK, "success")
 }
 
-/////////
-//ErrDetail ...
-type ErrDetail struct {
-	Resource string `json:"resource"`
-	Field    string `json:"field"`
-	Code     string `json:"code"`
+func testEq(a, b string) bool {
+
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
-//ErrMessage is return message default
-type ErrMessage struct {
-	Message string      `json:"message"`
-	Errors  []ErrDetail `json:"errors"`
-}
-
-//SuccessMessage is return Zen message
-type SuccessMessage struct {
-	Message string `json:"message"`
-}
-///////77
-
-//HandleUploadImage ...
-func HandleUploadImage(w http.ResponseWriter, r *http.Request) {
-	err := r.ParseMultipartForm(2000)
+func GetImage(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := bson.ObjectIdHex(vars["id"])
+	var excursion Excursion
+	err := excursionsCollection.Find(bson.M{"_id": id}).One(&excursion)
 	if err != nil {
-		body := ErrMessage{Message: err.Error(), Errors: nil}
-		respond(w, r, http.StatusBadRequest, body)
+		http.Error(w, "Excursion Not found", 404)
 		return
 	}
-
-	file, handler, err := r.FormFile("uploadfile")
+	var image Image
+	err = imagesCollection.Find(bson.M{"_excursion": excursion}).One(&image)
 	if err != nil {
-		body := ErrMessage{Message: err.Error(), Errors: nil}
-		respond(w, r, http.StatusBadRequest, body)
+		http.Error(w, "Image Not found", 404)
 		return
 	}
-	defer file.Close()
-
-	img, err := png.Decode(file)
-	if err != nil {
-		body := ErrMessage{Message: err.Error(), Errors: nil}
-		respond(w, r, http.StatusBadRequest, body)
+	//err = excursionsCollection.Find(bson.M{"_id": id}).One(&image)
+	w.Header().Set("Content-Type", "multipart/form-data")
+	w.WriteHeader(http.StatusOK)
+	//fpath := "./static/fileserver/" + path.Base(image.Title+"."+ext)
+	fpath := UPLOAD_PATH + image.Title
+	http.ServeFile(w, r, fpath)
+	if nil != err {
+		http.Error(w, "Internal server problem", 500)
 		return
 	}
-
-	bounds := img.Bounds()
-	fmt.Println(bounds.String())
-	img = checkSize(img, 30, 30)
-
-	start := time.Now()
-	total, results := slidingWindow(img, 30, 30)
-	elapsed := time.Since(start)
-	log.Printf("slidingWindow took %s", elapsed)
-	fmt.Println("resultado:", results)
-
-	data := "File processed with success. File name: " + handler.Filename + " " + bounds.String() + " total sliding=" + strconv.Itoa(total)
-	body := SuccessMessage{Message: data}
-	respond(w, r, http.StatusOK, body)
+	//b, _ := ioutil.ReadAll()
+	//w.Write(b)
 }
 
 func main() {
@@ -491,7 +517,8 @@ func main() {
 	r.HandleFunc("/api/excursions/v1", HandleAPIByDepartureCountry).Queries("departureCountry", "{departureCountry}").Methods("GET")
 	r.HandleFunc("/api/excursions/v1", HandleAPIByDestination).Queries("destination", "{destination}").Methods("GET")
 	// upload excursion image
-	r.HandleFunc("/upload", HandleUploadImage).Methods("POST")
+	r.HandleFunc("/api/excursions/{id}/images/upload", PostImage).Methods("POST")
+	r.HandleFunc("/api/excursions/{id}/images/download", GetImage).Methods("GET")
 	//r.HandleFunc("/api/excursions/image/upload", upload)
 
 	http.Handle("/api/", r)
@@ -504,7 +531,8 @@ func main() {
 
 	defer session.Close()
 	session.SetMode(mgo.Monotonic, true)
-	collection = session.DB("excursionsdb").C("excursions")
+	excursionsCollection = session.DB("excursionsdb").C("excursions")
+	imagesCollection = session.DB("excursionsdb").C("images")
 
 	log.Println("Listening on 27017")
 	http.ListenAndServe(":27017", nil)
