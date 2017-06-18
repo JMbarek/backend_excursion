@@ -1,5 +1,5 @@
 # backend_excursion
 
 Trips management service  
-developed with Golang 
+developed with Golang   
 connected to MongoDb  
