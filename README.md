@@ -1,8 +1,6 @@
 # backend_excursion
 
-Trips management service  
-developed with Golang   
-connected to MongoDb  
-'''
-code
-'''
+REST Api for Trips management  
+Developed with Go
+Gorilla Webtoolkit is as powerful URL router and dispatcher used.
+Connected to MongoDb. 
